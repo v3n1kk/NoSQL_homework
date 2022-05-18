@@ -125,7 +125,7 @@ db.pickups.aggregate([{$match: {"date":{$gte:"2/1/2015", $lt:"3/1/2015"}}}, {$gr
 ```
 
 ## Indexes
-#### Execution plan without index
+#### Execution plan without index (Total trips in February)
 ```
 db.pickups.explain().aggregate([{$match: {"date":{$gte:"2/1/2015", $lt:"3/1/2015"}}}, {$group: {_id:"$dispatching_base_number", totalTrips: {$sum:"$trips"}}}]);
 
