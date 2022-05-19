@@ -371,7 +371,7 @@ user      7290  0.2  1.2 1440724 50516 ?       Sl   06:46   0:20 mongos --config
 
 ```
 
-Проверим насколько остался работоспобным кластер- подключимся к mongos на порту 27100, проверим статус кластера, выберем произвольный набор данных из test и попробуем что-нибудь записать
+Проверим насколько остался работоспобным кластер- подключимся к mongos на порту 27100, проверим статус кластера и выберем произвольный набор данных из test и попробуем что-нибудь записать
 
 ```
 --- Sharding Status ---
@@ -437,12 +437,102 @@ db.sales.find({date: {$gte:ISODate("2015-01-01T00:00:00.000Z"), $lt:ISODate("201
 { "_id" : ObjectId("628635e5bea4dbf071ea107f"), "date" : ISODate("2015-01-09T00:00:00Z"), "saler_code" : "007un00tf5", "amount" : 181 }
 { "_id" : ObjectId("628635e6bea4dbf071ea119f"), "date" : ISODate("2015-01-09T00:00:00Z"), "saler_code" : "39vhhg6u3v", "amount" : 532 }
 
-db.sales.insert({date:ISODate("2022-05-19T00:00:00Z"),saler_code : "aaaaa11111", amount : 500}
+db.sales.insert({date:ISODate("2022-05-19T00:00:00Z"),saler_code : "aaaaa11111", amount : 500},{ writeConcern: { wtimeout: 5 }})
 WriteResult({ "nInserted" : 1 })
 
 ```
 
 Кластер остался работоспособен. 
 
+### Настройка авторизации
 
+Запустим отдельный инстанс mongo
+```
+mongod --dbpath /var/lib/mongo/db10 --port 27333 --fork --logpath /var/lib/mongo/db10/db10.log --pidfilepath /var/lib/mongo/db10/db10.pid
+```
+Создадим новую роль с полными правами (ServiceAdmins) и пользователя (DutyDBA)
 
+```
+mongo --port 27333
+db = db.getSiblingDB("admin")
+db.createRole(
+    {      
+     role: "ServiceAdmins",      
+     privileges:[
+        { resource: {anyResource:true}, actions: ["anyAction"]}
+     ],      
+     roles:[] 
+    }
+)
+
+{
+        "role" : "ServiceAdmins",
+        "privileges" : [
+                {
+                        "resource" : {
+                                "anyResource" : true
+                        },
+                        "actions" : [
+                                "anyAction"
+                        ]
+                }
+        ],
+        "roles" : [ ]
+}
+
+db.createUser({      
+     user: "DutyDBA",      
+     pwd: "24oclock",      
+     roles: ["ServiceAdmins"] 
+})
+
+Successfully added user: { "user" : "DutyDBA", "roles" : [ "ServiceAdmins" ] }
+```
+
+Проверим что пользователь добавлен
+```
+use admin
+db.system.roles.find()
+{ "_id" : "admin.ServiceAdmins", "role" : "ServiceAdmins", "db" : "admin", "privileges" : [ { "resource" : { "anyResource" : true }, "actions" : [ "anyAction" ] } ], "roles" : [ ] }
+
+db.system.users.find()
+{ "_id" : "admin.DutyDBA", "userId" : UUID("15209f3c-0b29-4999-aba1-c933255911b5"), "user" : "DutyDBA", "db" : "admin", "credentials" : { "SCRAM-SHA-1" : { "iterationCount" : 10000, "salt" : "0+36luQQ2QXMe6A/AxUtDA==", "storedKey" : "/eBtTQgXTV36IuA6dAHTDO8WwOc=", "serverKey" : "20N5/4ey4ubfOVrFPJarbdrnx2g=" }, "SCRAM-SHA-256" : { "iterationCount" : 15000, "salt" : "+tToBcPYpUzTbVbr9jfPIS7Qj7FIpBGoGfuUKw==", "storedKey" : "eKaokWxUgKo/i4hVrAiKCVQGCF4/dsDoVhxxqHyrxFs=", "serverKey" : "h/4ibrCarYwHRc6RGuFwvZZLRTHUyCZdQ4eNlIPGRvQ=" } }, "roles" : [ { "role" : "ServiceAdmins", "db" : "admin" } ] }
+```
+
+Перезапустим инстанс с параметром авторизации --auth
+
+```
+db.shutdownServer()
+mongod --dbpath /var/lib/mongo/db10 --port 27333 --auth --fork --logpath /var/lib/mongo/db10/db10.log --pidfilepath /var/lib/mongo/db10/db10.pid
+```
+
+Проверим авторизацию
+```
+mongo --port 27333
+MongoDB shell version v5.0.8
+connecting to: mongodb://127.0.0.1:27333/?compressors=disabled&gssapiServiceName=mongodb
+Implicit session: session { "id" : UUID("4ed7c123-75d6-467c-9682-196497bf096f") }
+MongoDB server version: 5.0.8
+================
+Warning: the "mongo" shell has been superseded by "mongosh",
+which delivers improved usability and compatibility.The "mongo" shell has been deprecated and will be removed in
+an upcoming release.
+For installation instructions, see
+https://docs.mongodb.com/mongodb-shell/install/
+================
+> show databases
+```
+
+Без указания пользователя подключится удается, но данные не отображаются
+
+Проверим авторизацию под новым пользователем
+```
+mongo --port 27333 -u DutyDBA -p 24oclock --authenticationDatabase "admin"
+show databases
+
+admin   0.000GB
+config  0.000GB
+local   0.000GB
+```
+
+Авторизация под новым пользователем успешна
